@@ -44,16 +44,23 @@ def build_parser() -> argparse.ArgumentParser:
     status = commands.add_parser("status", help="Show locally recorded resource status")
     status.add_argument("--json", action="store_true")
     commands.add_parser("schedule-help", help="Print Task Scheduler setup instructions")
+    commands.add_parser("doctor", help="Check the UI and browser installation without signing in")
     return parser
 
 
 def schedule_help() -> str:
-    return """Windows Task Scheduler (no task is created by this command):
+    if getattr(sys, "frozen", False):
+        program = str(Path(sys.executable).with_name("EgeDersCLI.exe"))
+        arguments = "--account YOUR_USERNAME@ogrenci.ege.edu.tr sync"
+    else:
+        program = sys.executable
+        arguments = "-m egeders_downloader.cli --account YOUR_USERNAME@ogrenci.ege.edu.tr sync"
+    return f"""Windows Task Scheduler (no task is created by this command):
 1. Log in once and choose courses in the GUI. Run a manual sync first.
 2. Create a Basic Task, choose a schedule, and select Start a program.
-   Program: C:\\Tools\\.venv\\Scripts\\python.exe
-   Arguments: -m egeders_downloader.cli --account USER@ogrenci.ege.edu.tr sync
-   Start in: C:\\Tools\\egeders_downloader
+   Program: {program}
+   Arguments: {arguments}
+   Start in: {Path(sys.executable).parent if getattr(sys, 'frozen', False) else Path.cwd()}
 3. Use the same Windows user that saved the session. Enable 'Do not start a
    new instance' to avoid overlapping syncs. No password is stored by this app.
 4. For a custom state directory, put --state-dir C:\\absolute\\state before sync.
@@ -68,6 +75,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "schedule-help":
         print(schedule_help())
         return 0
+    if args.command == "doctor":
+        from .diagnostics import check_installation
+        try:
+            print(json.dumps(check_installation(), indent=2))
+            return 0
+        except Exception as exc:  # noqa: BLE001 -- expose a failed offline install check
+            print(f"Installation check failed: {exc}", file=sys.stderr)
+            return 1
     try:
         settings = service.Settings(args.state_dir)
         config = settings.load()

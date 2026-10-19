@@ -9,8 +9,7 @@ from pathlib import Path
 
 from .models import Account, AuthExpiredError
 
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_STATE = PROJECT_ROOT / ".local"
+DEFAULT_STATE = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local" / "share")) / "EgeDersDownloader"
 DEFAULT_OUTPUT = Path.home() / "Documents" / "Ege Ders Materials"
 
 
@@ -156,3 +155,17 @@ def status(account: Account, state_dir: Path):
         return []
     with Manifest(database) as manifest:
         return manifest.status()
+
+
+def forget_login(account: Account, state_dir: Path) -> None:
+    """Remove only this account's authentication; retain history and materials."""
+    with account_lock(state_dir, account):
+        directory = Path(state_dir) / "accounts" / account.slug
+        for name in ("storage_state.json", "session_account.json"):
+            (directory / name).unlink(missing_ok=True)
+        settings = Settings(state_dir)
+        config = settings.load()
+        if config.get("account") == account.key:
+            config.pop("account", None)
+        config.get("selected", {}).pop(account.key, None)
+        settings.save(config)

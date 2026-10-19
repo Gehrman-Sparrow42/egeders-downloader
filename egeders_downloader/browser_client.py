@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import re
+import sys
 import tempfile
 import time
 from collections.abc import Callable
@@ -108,11 +109,16 @@ class BrowserClient:
         self._last_request = 0.0
 
     def __enter__(self):
+        if getattr(sys, "frozen", False):
+            os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "0"
         from playwright.sync_api import sync_playwright
         self._playwright = sync_playwright().start()
         try:
             try:
-                self.browser = self._playwright.chromium.launch(channel="msedge", headless=self.headless)
+                if getattr(sys, "frozen", False):
+                    self.browser = self._playwright.chromium.launch(headless=self.headless)
+                else:
+                    self.browser = self._playwright.chromium.launch(channel="msedge", headless=self.headless)
             except Exception:  # noqa: BLE001 - browser availability fallback, no auth attempted
                 if not Path(self._playwright.chromium.executable_path).is_file():
                     raise RuntimeError("Install Microsoft Edge or run: python -m playwright install chromium") from None

@@ -1,5 +1,17 @@
 # Verification record — 2026-10-19
 
+## Windows distribution (0.2.0)
+
+- New installation starts with blank username/password fields and no selected courses. Remembering a username requires an explicit selection.
+- The development account settings and saved university session were removed; downloaded PDFs and the old history database were retained locally.
+- Default state now lives in the Windows user's Local AppData directory, independently of the installed program. The old development `.local` state is not imported.
+- 55 automated tests pass, including onboarding and selective sign-out. Ruff and syntax checks pass.
+- The frozen application passed an offline check that creates the actual GUI, verifies blank first-run fields, and launches bundled Chromium 156 without account credentials or site requests.
+- Windows x64 installer, portable ZIP, and SHA-256 checksums are built from explicit source/runtime inputs. Release content was checked to exclude settings, login sessions, and history databases.
+- The installer was executed into an isolated test directory. Its installed CLI passed the same UI/browser/blank-account check. The uninstaller then completed successfully and removed the application executable. Both published download checksums were independently recomputed.
+
+The live course test below belongs to the earlier implementation. The 0.2.0 packaging checks use no university account and do not repeat authenticated downloads.
+
 Implementation follows the Argon Medium plan saved at `C:/Tools/plans/egeders-downloader/argon-plan.md`, with hash verification on every sync and no password storage in the first version.
 
 ## Live checks

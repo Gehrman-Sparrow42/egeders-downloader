@@ -1,5 +1,34 @@
 # Ege Ders Downloader
 
+## Download and install (Windows)
+
+**[Get the latest Windows release](https://github.com/Gehrman-Sparrow42/egeders-downloader/releases/latest)**
+
+- **Recommended:** download `EgeDersDownloader-0.2.0-Setup-x64.exe`. Installs for your Windows user, adds a Start menu shortcut, and supports uninstall through Windows Settings. No administrator privileges required.
+- **Portable:** download `EgeDersDownloader-0.2.0-Windows-x64.zip`, extract the entire folder, then open `EgeDersDownloader.exe`. Keep the `_internal` folder beside it.
+- Python, dependencies, and Chromium are included. No terminal or separate browser installation is needed. Intended for Windows 10/11 x64.
+- This repository is private: sign in to GitHub with an account that has access to download releases.
+
+New installations have **no built-in account**, blank username and password fields, and no selected courses. Enter your own university account. **Remember my username** is optional; passwords are never saved. **Forget login** removes your locally saved session and clears the username, while preserving downloaded files and history.
+
+After sign-in, courses appear automatically. Select courses in the Sync column, choose a destination folder, and click **Download selected courses**. Use **Open folder** to find your files.
+
+Settings and sessions are stored in `%LOCALAPPDATA%\EgeDersDownloader`, separately from the program. Installed and portable copies share that Windows-user state. Updates preserve it. Uninstall leaves user data and course downloads intact; use Forget login first to remove a saved university session.
+
+The installer is unsigned. Follow your computer's normal software approval process if Windows blocks it. This independent utility is not an official Ege University application.
+
+The bundle also includes `EgeDersCLI.exe`. Run `EgeDersCLI.exe doctor` for an offline UI/browser check. For scheduled sync, select this executable in Task Scheduler and pass `--account YOUR_USERNAME@ogrenci.ege.edu.tr sync`. No scheduled task is installed automatically.
+
+## Source installation and release builds
+
+From a clone, run `python -m pip install .`, then `egeders-desktop` (Python 3.10+ and Tkinter required). Source runs use installed Edge, with Playwright Chromium as a fallback. The Windows bundle includes its own browser.
+
+For release builds, use Python 3.13 on Windows x64 and Inno Setup 6. Install the project with its test extra and `pyinstaller==6.22.3`, then run `python scripts/build_windows.py`. The script builds GUI and CLI executables, checks the frozen application without an account, and creates the installer, ZIP, and SHA-256 checksums in `dist/`. It packages explicit modules and runtime assets, excluding local settings, sessions, databases, and course files. See the official [Playwright bundling guide](https://playwright.dev/python/docs/library#pyinstaller).
+
+`packaging/windows-release.workflow.yml` is a GitHub Actions template for version-tag and manual builds. It is not enabled: publishing active workflow files requires a GitHub login with the workflow permission. An authorized maintainer can copy it into `.github/workflows/` to enable automatic releases. Current release packages were built and verified locally.
+
+The following sections describe running from a source checkout.
+
 A local Windows application that signs in through EgeSSO, discovers your Ege Ders courses, and saves selected course resources. It includes a native desktop interface and a command line for repeat runs.
 
 ## Start
@@ -26,8 +55,8 @@ Microsoft Edge is the default browser. It must be installed; separate Playwright
 1. Enter your university username and choose its domain.
 2. Choose **Manual browser login** to sign in yourself, or enter a password and choose **Sign in with password**. The password field is cleared when submitted. Passwords are not saved by the application.
 3. Choose **Discover courses**. Courses from multiple semesters may appear.
-4. Filter by text or semester. Click the **Sync** column to check a course, or highlight rows and press Space. **Select visible** affects only the displayed rows. Hidden selections remain selected. Courses start unchecked unless you previously saved a selection for that account.
-5. Choose an absolute output folder and **Save selection**. Choose **Sync selected courses** to start.
+4. Filter by text or semester. Click the **Sync** column to check a course, or highlight rows and press Space. **Select visible** affects only displayed rows. Hidden selections remain selected.
+5. Choose an output folder, then click **Download selected courses**. Your selection is saved automatically.
 
 The default output root is `Documents\Ege Ders Materials` under your Windows user profile. Downloads are isolated by account and grouped by course and section. **Cancel sync** asks the current sync to stop after the current operation; an in-flight network request may take time to finish.
 
@@ -94,7 +123,7 @@ Saved university sessions expire on a schedule controlled by the university. An 
 
 ## Local data
 
-Settings, authentication sessions, and SQLite history live in the project's `.local` directory by default. Use global `--state-dir` for a separate CLI state root. Accounts have separate sessions and manifest history. Authentication state grants access to your university session; keep `.local` private. It is excluded by `.gitignore`, along with database files, partial downloads, caches, and environment files.
+Settings, authentication sessions, and SQLite history live in `%LOCALAPPDATA%\EgeDersDownloader` by default. Use global `--state-dir` for a separate CLI state root. Accounts have separate sessions and manifest history. Authentication state grants access to your university session; keep this user-data folder private. No state from the old development `.local` folder is automatically imported.
 
 The source contains no account details or saved passwords. This tool reads course content and download resources; it does not submit assignments, quizzes, completion toggles, or messages. Manual login actions remain under your control in the browser.
 
