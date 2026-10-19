@@ -7,7 +7,7 @@
 - **Recommended:** download `EgeDersDownloader-0.2.0-Setup-x64.exe`. Installs for your Windows user, adds a Start menu shortcut, and supports uninstall through Windows Settings. No administrator privileges required.
 - **Portable:** download `EgeDersDownloader-0.2.0-Windows-x64.zip`, extract the entire folder, then open `EgeDersDownloader.exe`. Keep the `_internal` folder beside it.
 - Python, dependencies, and Chromium are included. No terminal or separate browser installation is needed. Intended for Windows 10/11 x64.
-- This repository is private: sign in to GitHub with an account that has access to download releases.
+- The repository and release downloads are public. No GitHub account is needed to download the installer or portable ZIP.
 
 New installations have **no built-in account**, blank username and password fields, and no selected courses. Enter your own university account. **Remember my username** is optional; passwords are never saved. **Forget login** removes your locally saved session and clears the username, while preserving downloaded files and history.
 
