@@ -16,3 +16,6 @@ session_account.json
 *.part*
 downloads/
 test-output/
+
+# Temporary parallel checkouts belong to this project.
+/.worktrees/

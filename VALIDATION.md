@@ -23,7 +23,7 @@
 
 The live course test below belongs to the earlier implementation. The 0.2.0 packaging checks use no university account and do not repeat authenticated downloads.
 
-Implementation follows the Argon Medium plan saved at `C:/Tools/plans/egeders-downloader/argon-plan.md`, with hash verification on every sync and no password storage in the first version.
+Implementation follows the Argon Medium plan saved locally at `.local/plans/argon-plan.md`, with hash verification on every sync and no password storage in the first version.
 
 ## Live checks
 
