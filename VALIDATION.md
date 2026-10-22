@@ -1,5 +1,16 @@
 # Verification record — 2026-10-19
 
+## Presentation conversion and course inventory — 0.3.0 (2026-10-22)
+
+- GUI and CLI inventory enumerate named file resources and unsupported Moodle activities with course, section, type, canonical URL and status, without following unsupported activities.
+- Optional PPT/PPTX PDF conversion preserves originals, retries conversions after prior failure, and does not overwrite user-edited PDFs. Missing converters and conversion failures are separate from download failures.
+- Conversion uses installed PowerPoint or LibreOffice; neither suite is bundled. PowerPoint macros are disabled before opening presentations, pre-existing Office sessions are not borrowed, and process cleanup requires an identified helper PID. Visible PowerPoint windows are preserved during cleanup.
+- The integrated suite passed 72 tests, including real synthetic PPTX and PPT conversions, inventory parsing/security, conversion history/retry, unavailable backend behavior, preservation, and process-ownership regression tests. Ruff and Python compilation passed.
+- Frozen desktop and CLI executables each converted a synthetic presentation (PPTX and PPT respectively), producing valid one-page PDFs containing the expected slide text. Input hashes stayed unchanged; no PowerPoint processes remained.
+- Frozen doctor confirmed blank first-run credentials, browser startup, GUI initialization, and detection of the local PowerPoint converter.
+- Version 0.3.0 installed successfully into an isolated test directory; its installed executable matched the tested build and passed doctor. Uninstall removed the application successfully. ZIP content checks and independent SHA-256 recomputation passed for both download packages.
+- No university credentials or course session were reused for these checks. Real LibreOffice conversion was not tested because LibreOffice is not installed; its invocation and isolated profile were covered by unit tests.
+
 ## Windows distribution (0.2.0)
 
 - New installation starts with blank username/password fields and no selected courses. Remembering a username requires an explicit selection.

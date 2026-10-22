@@ -5,7 +5,7 @@ import json
 import pytest
 
 from egeders_downloader import cli, service
-from egeders_downloader.models import AuthExpiredError, Course, Summary
+from egeders_downloader.models import Activity, AuthExpiredError, Course, Summary
 
 
 @pytest.fixture
@@ -35,6 +35,64 @@ def test_sync_saved_selection_json(configured, monkeypatch, capsys):
     assert json.loads(captured.out)["new"] == 1
     assert captured.err.strip() == "progress"
     assert calls == [("test@ogrenci.ege.edu.tr", [123])]
+
+
+def test_sync_convert_pptx_flag_and_conversion_failure_exit_zero(configured, monkeypatch, capsys):
+    calls = []
+
+    def sync(account, state_dir, output, course_ids, log, convert_pptx=False):
+        calls.append((course_ids, convert_pptx))
+        return Summary(new=1, converted=0, conversion_failed=1, errors=["Conversion failed for resource 1"])
+
+    monkeypatch.setattr(service, "sync", sync)
+    assert cli.main([*configured, "sync", "--convert-pptx", "--json"]) == 0
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+    assert payload["new"] == 1
+    assert payload["conversion_failed"] == 1
+    assert calls == [([123], True)]
+
+
+def test_inventory_json_and_text(configured, monkeypatch, capsys):
+    sample = [
+        Activity(
+            course_id=123,
+            id=10,
+            title="Week 1.pptx",
+            section="Week 1",
+            kind="resource",
+            type_label="File (PPTX)",
+            url="https://egeders.ege.edu.tr/mod/resource/view.php?id=10",
+            downloadable=True,
+            status="Downloadable file resource (PPT/PPTX → PDF supported)",
+            course_title="Economics",
+        ),
+        Activity(
+            course_id=123,
+            id=11,
+            title="Midterm Quiz",
+            section="Week 2",
+            kind="quiz",
+            type_label="Quiz",
+            url="https://egeders.ege.edu.tr/mod/quiz/view.php?id=11",
+            downloadable=False,
+            status="Unsupported quiz (not downloaded or followed)",
+            course_title="Economics",
+        ),
+    ]
+    monkeypatch.setattr(service, "inventory", lambda account, state_dir, course_ids, log: sample)
+    assert cli.main([*configured, "inventory", "--json"]) == 0
+    parsed = json.loads(capsys.readouterr().out)
+    assert len(parsed) == 2
+    assert parsed[0]["type_label"] == "File (PPTX)"
+    assert parsed[1]["kind"] == "quiz"
+    assert not parsed[1]["downloadable"]
+
+    assert cli.main([*configured, "inventory", "--course", "123"]) == 0
+    text_out = capsys.readouterr().out
+    assert "Week 1.pptx" in text_out
+    assert "Midterm Quiz" in text_out
+    assert "https://egeders.ege.edu.tr/mod/quiz/view.php?id=11" in text_out
 
 
 def test_expired_session_exit_two(configured, monkeypatch, capsys):

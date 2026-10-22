@@ -3,7 +3,7 @@ from pathlib import Path
 
 root = Path(SPECPATH).parent
 a = Analysis([str(root / "packaging" / "run_app.py")], pathex=[str(root)],
-             hiddenimports=["egeders_downloader.cli", "egeders_downloader.gui"],
+             hiddenimports=["egeders_downloader.cli", "egeders_downloader.converter", "egeders_downloader.gui", "pythoncom", "pywintypes", "win32com", "win32com.client", "win32process", "win32gui"],
              excludes=["IPython", "matplotlib", "numpy", "pandas", "pytest"],
              datas=[], binaries=[])
 pyz = PYZ(a.pure)

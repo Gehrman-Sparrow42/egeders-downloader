@@ -61,10 +61,34 @@ class Resource:
     metadata: str = ""
 
 
+@dataclass(frozen=True)
+class Activity:
+    course_id: int
+    id: int
+    title: str
+    section: str
+    kind: str
+    type_label: str
+    url: str
+    downloadable: bool
+    status: str
+    metadata: str = ""
+    course_title: str = ""
+
+
 @dataclass
 class CoursePage:
     resources: list[Resource]
     unsupported: dict[str, int] = field(default_factory=dict)
+    activities: list[Activity] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ConverterInfo:
+    available: bool
+    backend: str
+    detail: str
+    executable: str = ""
 
 
 @dataclass(frozen=True)
@@ -84,5 +108,7 @@ class Summary:
     unchanged: int = 0
     failed: int = 0
     unsupported: int = 0
+    converted: int = 0
+    conversion_failed: int = 0
     cancelled: bool = False
     errors: list[str] = field(default_factory=list)

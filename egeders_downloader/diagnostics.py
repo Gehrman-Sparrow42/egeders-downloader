@@ -1,10 +1,12 @@
-"""Offline installation check: native UI and bundled browser, no account needed."""
+"""Offline installation check: native UI, converter detection and bundled browser, no account needed."""
 
 import tempfile
 import tkinter as tk
+from dataclasses import asdict
 from pathlib import Path
 
 from .browser_client import BrowserClient
+from .converter import detect_converter
 from .gui import Application
 from .models import Account
 from .service import DEFAULT_STATE, Settings
@@ -18,7 +20,8 @@ def check_installation() -> dict:
             app = Application(root, settings=Settings(Path(directory) / "state"))
             root.update()
             assert app.username.get() == app.password.get() == ""
-            assert not app.selected and not app.remember.get()
+            assert not app.selected and not app.remember.get() and not app.convert_pptx.get()
+            assert not app.inventory_items
             tk_version = str(root.tk.call("info", "patchlevel"))
         finally:
             root.destroy()
@@ -28,4 +31,11 @@ def check_installation() -> dict:
             page.set_content("<title>Ege Ders installation check</title><h1>Ready</h1>")
             assert page.title() == "Ege Ders installation check"
             browser_version = client.browser.version
-    return {"ok": True, "first_run_blank": True, "tk": tk_version, "browser": browser_version, "state_directory": str(DEFAULT_STATE)}
+    return {
+        "ok": True,
+        "first_run_blank": True,
+        "tk": tk_version,
+        "browser": browser_version,
+        "converter": asdict(detect_converter()),
+        "state_directory": str(DEFAULT_STATE),
+    }

@@ -6,7 +6,14 @@ from pathlib import Path
 import pytest
 
 from egeders_downloader.manifest import Manifest
-from egeders_downloader.models import Account, AuthExpiredError, Course, Download
+from egeders_downloader.models import (
+    Account,
+    AuthExpiredError,
+    ConverterInfo,
+    Course,
+    Download,
+)
+from egeders_downloader.paths import choose_destination, resource_directory
 from egeders_downloader.sync_engine import sync_courses
 
 COURSE = Course(
@@ -16,19 +23,33 @@ COURSE = Course(
 )
 HTML = """<li class="section"><h3 class="sectionname">Introduction</h3>
 <li class="activity"><a href="/mod/resource/view.php?id=1342714">Introduction</a></li></li>"""
+PPTX_HTML = """<li class="section"><h3 class="sectionname">Week 1</h3>
+<li class="activity"><a href="/mod/resource/view.php?id=1342714">Lecture 1.pptx</a></li>
+<li class="activity"><a href="/mod/quiz/view.php?id=800">Midterm Quiz</a></li>
+<li class="activity"><a href="/mod/forum/view.php?id=801">Course Forum</a></li></li>"""
 
 
 class FakeClient:
-    def __init__(self, body=b"%PDF-1.7\nhello", html=HTML):
+    def __init__(
+        self,
+        body=b"%PDF-1.7\nhello",
+        html=HTML,
+        filename="Introduction.pdf",
+        content_type="application/pdf",
+    ):
         self.body = body
         self.html = html
+        self.filename = filename
+        self.content_type = content_type
         self.calls = 0
+        self.downloaded_urls: list[str] = []
 
     def get_html(self, url):
         return self.html
 
     def download(self, resource, temp_dir):
         self.calls += 1
+        self.downloaded_urls.append(resource.url)
         if isinstance(self.body, Exception):
             raise self.body
         with tempfile.NamedTemporaryFile(
@@ -38,17 +59,25 @@ class FakeClient:
             path = Path(stream.name)
         return Download(
             path,
-            "Introduction.pdf",
+            self.filename,
             hashlib.sha256(self.body).hexdigest(),
             len(self.body),
-            "https://egeders.ege.edu.tr/pluginfile.php/1/test.pdf",
-            "application/pdf",
+            f"https://egeders.ege.edu.tr/pluginfile.php/1/{self.filename}",
+            self.content_type,
         )
 
 
-def run(client, manifest, root, cancel=None):
+def run(client, manifest, root, cancel=None, convert_pptx=False, converter=None, log=lambda _: None):
     return sync_courses(
-        client, manifest, Account("teststudent"), [COURSE], root, lambda _: None, cancel
+        client,
+        manifest,
+        Account("teststudent"),
+        [COURSE],
+        root,
+        log,
+        cancel,
+        convert_pptx=convert_pptx,
+        converter=converter,
     )
 
 
@@ -166,3 +195,119 @@ def test_manifest_failure_after_publish_recovers_without_duplicate(tmp_path, mon
         assert len(manifest.versions(1342714)) == 1
         assert manifest.latest(1342714)["path"] == str(orphan.resolve())
         assert not list(output.rglob("*.part"))
+
+
+def test_sync_logs_unsupported_activity_names_and_never_follows_them(tmp_path):
+    logs: list[str] = []
+    client = FakeClient(
+        body=b"PK\x03\x04slide-bytes",
+        html=PPTX_HTML,
+        filename="Lecture 1.pptx",
+        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+    with Manifest(tmp_path / "manifest.db") as manifest:
+        summary = run(client, manifest, tmp_path / "out", log=logs.append)
+    assert summary.new == 1
+    assert summary.unsupported == 2
+    assert client.downloaded_urls == ["https://egeders.ege.edu.tr/mod/resource/view.php?id=1342714"]
+    joined = "\n".join(logs)
+    assert "Midterm Quiz" in joined
+    assert "Course Forum" in joined
+
+
+def test_pptx_conversion_new_unchanged_idempotent_and_retry(tmp_path):
+    slide_bytes = b"PK\x03\x04synthetic-pptx-payload"
+    pdf_bytes = b"%PDF-1.7\nconverted slide content\n%%EOF\n"
+    client = FakeClient(
+        body=slide_bytes,
+        html=PPTX_HTML,
+        filename="Lecture 1.pptx",
+        content_type="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+    conversions = []
+
+    def working_converter(source: Path, target: Path):
+        conversions.append(source)
+        target.write_bytes(pdf_bytes)
+
+    output = tmp_path / "out"
+    with Manifest(tmp_path / "manifest.db") as manifest:
+        # 1. Converter unavailable: download still succeeds and is not marked failed.
+        unavailable = ConverterInfo(False, "none", "No converter installed")
+        first = run(client, manifest, output, convert_pptx=True, converter=unavailable)
+        assert (first.new, first.failed, first.converted, first.conversion_failed) == (1, 0, 0, 1)
+        pptx_files = list(output.rglob("*.pptx"))
+        assert len(pptx_files) == 1
+        assert pptx_files[0].read_bytes() == slide_bytes
+        assert list(output.rglob("*.pdf")) == []
+
+        # 2. Converter fails mid-conversion on unchanged presentation: download stays unchanged, not failed.
+        def failing_converter(_source: Path, _target: Path):
+            raise RuntimeError("Simulated COM error")
+
+        second = run(client, manifest, output, convert_pptx=True, converter=failing_converter)
+        assert (second.unchanged, second.failed, second.converted, second.conversion_failed) == (1, 0, 0, 1)
+        assert pptx_files[0].read_bytes() == slide_bytes
+        assert list(output.rglob("*.pdf")) == []
+        assert not list(output.rglob("*.part"))
+
+        # 3. Retry on next sync with working converter succeeds on unchanged presentation.
+        third = run(client, manifest, output, convert_pptx=True, converter=working_converter)
+        assert (third.unchanged, third.failed, third.converted, third.conversion_failed) == (1, 0, 1, 0)
+        assert len(conversions) == 1
+        pdf_files = list(output.rglob("*.pdf"))
+        assert len(pdf_files) == 1
+        assert pdf_files[0].read_bytes() == pdf_bytes
+        assert pptx_files[0].read_bytes() == slide_bytes
+
+        # 4. Repeat sync is idempotent: does not re-run converter or create duplicate PDFs.
+        fourth = run(client, manifest, output, convert_pptx=True, converter=working_converter)
+        assert (fourth.unchanged, fourth.failed, fourth.converted, fourth.conversion_failed) == (1, 0, 0, 0)
+        assert len(conversions) == 1
+        assert list(output.rglob("*.pdf")) == pdf_files
+
+
+def test_conversion_preserves_existing_pdf_and_user_edits(tmp_path):
+    slide_bytes = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1legacy-ppt"
+    pdf_bytes = b"%PDF-1.7\nfreshly converted\n%%EOF\n"
+    client = FakeClient(
+        body=slide_bytes,
+        html=PPTX_HTML,
+        filename="Lecture 1.ppt",
+        content_type="application/vnd.ms-powerpoint",
+    )
+    output = tmp_path / "out"
+    account = Account("teststudent")
+    from egeders_downloader.parser import parse_course
+
+    resource = parse_course(PPTX_HTML, COURSE.id).resources[0]
+    directory = resource_directory(output, account, COURSE, resource)
+    directory.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256(slide_bytes).hexdigest()
+    preexisting_pdf = choose_destination(directory, "Lecture 1.pdf", resource.id, digest)
+    preexisting_pdf.write_bytes(b"%PDF-1.7\nuser preexisting pdf\n%%EOF\n")
+
+    def converter(_source: Path, target: Path):
+        target.write_bytes(pdf_bytes)
+
+    with Manifest(tmp_path / "manifest.db") as manifest:
+        first = run(client, manifest, output, convert_pptx=True, converter=converter)
+        assert (first.new, first.converted, first.failed) == (1, 1, 0)
+        assert preexisting_pdf.read_bytes() == b"%PDF-1.7\nuser preexisting pdf\n%%EOF\n"
+        latest_source = Path(manifest.latest(resource.id)["path"])
+        assert latest_source.read_bytes() == slide_bytes
+        conv = manifest.conversion(resource.id, digest, latest_source)
+        converted_pdf = Path(conv["pdf_path"])
+        assert converted_pdf != preexisting_pdf
+        assert converted_pdf.read_bytes() == pdf_bytes
+
+        # User annotates/edits the converted PDF; next sync must preserve user edits and create a clean copy.
+        converted_pdf.write_bytes(b"%PDF-1.7\nuser annotated converted pdf\n%%EOF\n")
+        second = run(client, manifest, output, convert_pptx=True, converter=converter)
+        assert (second.unchanged, second.converted, second.failed) == (1, 1, 0)
+        assert preexisting_pdf.read_bytes() == b"%PDF-1.7\nuser preexisting pdf\n%%EOF\n"
+        assert converted_pdf.read_bytes() == b"%PDF-1.7\nuser annotated converted pdf\n%%EOF\n"
+        updated_conv = manifest.conversion(resource.id, digest, latest_source)
+        replacement_pdf = Path(updated_conv["pdf_path"])
+        assert replacement_pdf not in {preexisting_pdf, converted_pdf}
+        assert replacement_pdf.read_bytes() == pdf_bytes

@@ -5,9 +5,10 @@ import os
 import tempfile
 import threading
 from contextlib import contextmanager
+from dataclasses import replace
 from pathlib import Path
 
-from .models import Account, AuthExpiredError
+from .models import Account, Activity, AuthExpiredError, ConverterInfo, Course
 
 DEFAULT_STATE = Path(os.environ.get("LOCALAPPDATA", Path.home() / ".local" / "share")) / "EgeDersDownloader"
 DEFAULT_OUTPUT = Path.home() / "Documents" / "Ege Ders Materials"
@@ -83,6 +84,12 @@ def account_lock(state_dir: Path, account: Account):
                 fcntl.flock(stream, fcntl.LOCK_UN)
 
 
+def converter_status() -> ConverterInfo:
+    from .converter import detect_converter
+
+    return detect_converter()
+
+
 def login(
     account: Account,
     state_dir: Path,
@@ -110,6 +117,92 @@ def discover(account: Account, state_dir: Path, log=print):
             return parse_courses(client.get_html("https://egeders.ege.edu.tr/"))
 
 
+def inspect_courses(
+    client,
+    manifest,
+    courses: list[Course],
+    log=print,
+    cancel: threading.Event | None = None,
+) -> list[Activity]:
+    """Build a read-only course inventory without downloading or following activities."""
+    from .parser import infer_resource_type, parse_course
+
+    items: list[Activity] = []
+    for course in courses:
+        if cancel and cancel.is_set():
+            break
+        log(f"Course: {course.title}")
+        page = parse_course(client.get_html(course.url), course.id)
+        for item in page.activities:
+            type_label = item.type_label
+            status_text = item.status
+            if item.downloadable and manifest is not None:
+                latest = manifest.latest(item.id)
+                if latest is not None:
+                    local_file = Path(latest["path"])
+                    if type_label == "File":
+                        type_label = infer_resource_type(
+                            latest["filename"], item.metadata, latest["content_type"]
+                        )
+                    if local_file.is_file():
+                        conv = manifest.conversion(item.id, latest["sha256"], local_file)
+                        if (
+                            conv
+                            and conv["status"] == "converted"
+                            and conv["pdf_path"]
+                            and Path(conv["pdf_path"]).is_file()
+                        ):
+                            status_text = (
+                                f"Downloaded ({latest['filename']}) + PDF ({Path(conv['pdf_path']).name})"
+                            )
+                        elif conv and conv["status"] == "failed":
+                            status_text = f"Downloaded ({latest['filename']}); PDF conversion failed"
+                        else:
+                            status_text = f"Downloaded ({latest['filename']})"
+            items.append(
+                replace(
+                    item,
+                    type_label=type_label,
+                    status=status_text,
+                    course_title=course.title,
+                )
+            )
+    return items
+
+
+def inventory(
+    account: Account,
+    state_dir: Path,
+    course_ids: list[int],
+    log=print,
+    cancel: threading.Event | None = None,
+) -> list[Activity]:
+    from .browser_client import BrowserClient
+    from .manifest import Manifest
+    from .parser import parse_courses
+
+    if not course_ids:
+        raise ValueError("Select at least one course before browsing inventory.")
+    with account_lock(state_dir, account):  # noqa: SIM117 -- lock precedes browser startup
+        with BrowserClient(account, Path(state_dir), log=log) as client:
+            if not client.check_session():
+                raise AuthExpiredError("Session expired or missing. Use Login first.")
+            courses = parse_courses(client.get_html("https://egeders.ege.edu.tr/"))
+            requested = set(course_ids)
+            selected = [course for course in courses if course.id in requested]
+            missing = requested - {course.id for course in selected}
+            if missing:
+                raise ValueError(
+                    "Selected courses were not found in your course list: "
+                    + ", ".join(map(str, sorted(missing)))
+                )
+            database = Path(state_dir) / "accounts" / account.slug / "manifest.sqlite3"
+            if database.exists():
+                with Manifest(database) as manifest:
+                    return inspect_courses(client, manifest, selected, log, cancel)
+            return inspect_courses(client, None, selected, log, cancel)
+
+
 def sync(
     account: Account,
     state_dir: Path,
@@ -117,6 +210,7 @@ def sync(
     course_ids: list[int],
     log=print,
     cancel: threading.Event | None = None,
+    convert_pptx: bool = False,
 ):
     from .browser_client import BrowserClient
     from .manifest import Manifest
@@ -143,7 +237,14 @@ def sync(
             database = Path(state_dir) / "accounts" / account.slug / "manifest.sqlite3"
             with Manifest(database) as manifest:
                 return sync_courses(
-                    client, manifest, account, selected, output, log, cancel
+                    client,
+                    manifest,
+                    account,
+                    selected,
+                    output,
+                    log,
+                    cancel,
+                    convert_pptx=convert_pptx,
                 )
 
 

@@ -1,4 +1,9 @@
-from egeders_downloader.parser import is_authenticated, parse_course, parse_courses
+from egeders_downloader.parser import (
+    infer_resource_type,
+    is_authenticated,
+    parse_course,
+    parse_courses,
+)
 
 
 def test_courses_official_positive_ids_deduplication():
@@ -35,6 +40,55 @@ def test_resources_sections_metadata_and_unsupported_deduplication():
     assert resource.section == "Week 1"
     assert "573 KB" in resource.metadata
     assert page.unsupported == {"quiz": 1, "folder": 1}
+
+
+def test_inventory_activities_types_canonical_urls_security_and_deduplication():
+    page = parse_course('''<ul>
+      <li id="section-1" class="section"><h3 class="sectionname">Week 1</h3>
+        <li class="activity"><a href="/mod/resource/view.php?id=101">Lecture 1.pptx</a></li>
+        <li class="activity"><a href="/mod/resource/view.php?id=102">Legacy Slides.ppt</a></li>
+        <li class="activity">
+          <a href="/mod/resource/view.php?id=103"><span class="accesshide">Kaynak</span></a>
+          <a href="/mod/resource/view.php?id=103">Reading Notes</a>
+          <div class="resourcedetails">1.1 MB PDF</div>
+        </li>
+        <li class="activity"><a href="/mod/resource/view.php?id=104">Dataset.zip</a></li>
+        <li class="activity"><a href="/mod/folder/view.php?id=201">Reference Folder</a></li>
+        <li class="activity"><a href="/mod/url/view.php?id=202">External Reading</a></li>
+        <li class="activity"><a href="/mod/page/view.php?id=203">Syllabus Page</a></li>
+        <li class="activity"><a href="/mod/quiz/view.php?id=204">Week 1 Quiz</a><a href="/mod/quiz/view.php?id=204">Duplicate Quiz</a></li>
+        <li class="activity"><a href="/mod/assign/view.php?id=205">Homework 1</a></li>
+        <li class="activity"><a href="/mod/forum/view.php?id=206">Announcements</a></li>
+        <a href="https://evil.example/mod/forum/view.php?id=900">Phishing Forum</a>
+        <a href="https://egeders.ege.edu.tr.evil.example/mod/url/view.php?id=901">Spoofed</a>
+        <a href="http://egeders.ege.edu.tr/mod/resource/view.php?id=902">Insecure HTTP</a>
+        <a href="/mod/quiz/attempt.php?id=204">Quiz Attempt</a>
+        <a href="/mod/assign/view.php?id=0">Zero ID</a>
+        <a href="/mod/assign/view.php?id=-5">Negative ID</a>
+        <a href="/mod/assign/view.php?id=1&id=2">Ambiguous ID</a>
+      </li></ul>''', 178423)
+    assert [(a.id, a.kind, a.type_label, a.title, a.downloadable) for a in page.activities] == [
+        (101, "resource", "File (PPTX)", "Lecture 1.pptx", True),
+        (102, "resource", "File (PPT)", "Legacy Slides.ppt", True),
+        (103, "resource", "File (PDF)", "Reading Notes", True),
+        (104, "resource", "File (ZIP)", "Dataset.zip", True),
+        (201, "folder", "Folder", "Reference Folder", False),
+        (202, "url", "URL", "External Reading", False),
+        (203, "page", "Page", "Syllabus Page", False),
+        (204, "quiz", "Quiz", "Week 1 Quiz", False),
+        (205, "assign", "Assignment", "Homework 1", False),
+        (206, "forum", "Forum", "Announcements", False),
+    ]
+    for item in page.activities:
+        assert item.section == "Week 1"
+        assert item.url == f"https://egeders.ege.edu.tr/mod/{item.kind}/view.php?id={item.id}"
+        if item.downloadable:
+            assert "Downloadable" in item.status
+        else:
+            assert "not downloaded or followed" in item.status
+    assert infer_resource_type("Report.docx") == "File (DOCX)"
+    assert infer_resource_type("Grades.xlsx") == "File (XLSX)"
+    assert infer_resource_type("Deck", "2.0 MB PowerPoint presentation") == "File (PowerPoint)"
 
 
 def test_authentication_requires_user_menu_and_rejects_guest():

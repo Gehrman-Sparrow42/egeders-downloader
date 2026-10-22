@@ -1,4 +1,4 @@
-"""Command-line access to login, discovery and repeatable material syncs."""
+"""Command-line access to login, discovery, inventory and repeatable material syncs."""
 
 import argparse
 import getpass
@@ -29,6 +29,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     courses = commands.add_parser("courses", help="Discover accessible courses")
     courses.add_argument("--json", action="store_true")
+    inventory = commands.add_parser(
+        "inventory",
+        help="List course materials and activities without downloading",
+    )
+    inventory.add_argument(
+        "--course",
+        type=int,
+        nargs="+",
+        action="extend",
+        help="One or more course IDs; repeatable",
+    )
+    inventory.add_argument("--json", action="store_true")
     sync = commands.add_parser(
         "sync", help="Sync specified courses or the selection saved in the GUI"
     )
@@ -40,6 +52,21 @@ def build_parser() -> argparse.ArgumentParser:
         help="One or more course IDs; repeatable",
     )
     sync.add_argument("--output", type=Path, help="Absolute output root")
+    sync.add_argument(
+        "--convert-pptx",
+        "--convert-pdf",
+        dest="convert_pptx",
+        action="store_true",
+        default=None,
+        help="Convert downloaded PPT/PPTX presentations to PDF",
+    )
+    sync.add_argument(
+        "--no-convert-pptx",
+        "--no-convert-pdf",
+        dest="convert_pptx",
+        action="store_false",
+        help="Skip PPT/PPTX to PDF conversion for this run",
+    )
     sync.add_argument("--json", action="store_true")
     status = commands.add_parser("status", help="Show locally recorded resource status")
     status.add_argument("--json", action="store_true")
@@ -64,12 +91,33 @@ def schedule_help() -> str:
 3. Use the same Windows user that saved the session. Enable 'Do not start a
    new instance' to avoid overlapping syncs. No password is stored by this app.
 4. For a custom state directory, put --state-dir C:\\absolute\\state before sync.
-   Saved output and course selection are reused. Expired login exits with code 2;
-   rerun login interactively and retry. Other failures exit 1. Success exits 0.
+   Saved output, course selection, and PPT/PPTX conversion preference are reused.
+   Pass --convert-pptx after sync to enable PDF conversion explicitly.
+   Expired login exits with code 2; rerun login interactively and retry.
+   Other failures exit 1. Success exits 0.
 Automatic re-login after session expiry is not included in this version."""
 
 
+def _resolve_course_ids(explicit: list[int] | None, config: dict, account_key: str) -> list[int]:
+    course_ids = explicit or config.get("selected", {}).get(account_key, [])
+    if not course_ids:
+        raise ValueError(
+            "No courses selected. Supply --course ID, or save a selection in the GUI."
+        )
+    if any(
+        not isinstance(course_id, int) or course_id <= 0
+        for course_id in course_ids
+    ):
+        raise ValueError("Course IDs must be positive integers.")
+    return list(dict.fromkeys(course_ids))
+
+
 def main(argv: list[str] | None = None) -> int:
+    raw_args = list(sys.argv[1:] if argv is None else argv)
+    if raw_args and raw_args[0] == "_convert-powerpoint":
+        from .converter import run_powerpoint_worker
+
+        return run_powerpoint_worker(raw_args[1:])
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "schedule-help":
@@ -131,6 +179,29 @@ def main(argv: list[str] | None = None) -> int:
             else:
                 for course in courses:
                     print(f"{course.id}\t{course.semester or '-'}\t{course.title}")
+        elif args.command == "inventory":
+            course_ids = _resolve_course_ids(args.course, config, account.key)
+            items = service.inventory(
+                account,
+                settings.state_dir,
+                course_ids,
+                log=log,
+            )
+            if args.json:
+                print(
+                    json.dumps(
+                        [asdict(item) for item in items],
+                        ensure_ascii=False,
+                        indent=2,
+                    )
+                )
+            else:
+                for item in items:
+                    print(
+                        f"{item.course_id}\t{item.section}\t{item.type_label}\t{item.title}\t{item.status}\t{item.url}"
+                    )
+                if not items:
+                    print("No course materials or activities found.")
         elif args.command == "status":
             rows = service.status(account, settings.state_dir)
             if args.json:
@@ -141,31 +212,33 @@ def main(argv: list[str] | None = None) -> int:
                 if not rows:
                     print("No downloaded resources recorded for this account.")
         elif args.command == "sync":
-            course_ids = args.course or config.get("selected", {}).get(account.key, [])
-            if not course_ids:
-                raise ValueError(
-                    "No courses selected. Supply --course ID, or save a selection in the GUI."
-                )
-            if any(
-                not isinstance(course_id, int) or course_id <= 0
-                for course_id in course_ids
-            ):
-                raise ValueError("Course IDs must be positive integers.")
+            course_ids = _resolve_course_ids(args.course, config, account.key)
             output = args.output or Path(config.get("output") or service.DEFAULT_OUTPUT)
             if not output.is_absolute():
                 raise ValueError("Output must be an absolute path.")
+            convert_pptx = (
+                bool(config.get("convert_pptx", False))
+                if args.convert_pptx is None
+                else bool(args.convert_pptx)
+            )
+            sync_kwargs = {"log": log}
+            if convert_pptx:
+                sync_kwargs["convert_pptx"] = True
             summary = service.sync(
                 account,
                 settings.state_dir,
                 output,
-                list(dict.fromkeys(course_ids)),
-                log=log,
+                course_ids,
+                **sync_kwargs,
             )
             if args.json:
                 print(json.dumps(asdict(summary), ensure_ascii=False, indent=2))
             else:
                 print(
-                    f"New: {summary.new}; updated: {summary.updated}; unchanged: {summary.unchanged}; failed: {summary.failed}; unsupported: {summary.unsupported}; cancelled: {summary.cancelled}"
+                    f"New: {summary.new}; updated: {summary.updated}; unchanged: {summary.unchanged}; "
+                    f"failed: {summary.failed}; unsupported: {summary.unsupported}; "
+                    f"converted: {summary.converted}; conversion_failed: {summary.conversion_failed}; "
+                    f"cancelled: {summary.cancelled}"
                 )
                 for error in summary.errors:
                     print(error, file=sys.stderr)
